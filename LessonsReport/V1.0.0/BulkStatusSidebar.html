@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <style>
+    body { direction: rtl; font-family: Arial, sans-serif; padding:15px; }
+    h3 { margin-top:10px; color:#444; text-align:center; font-size:18px; font-weight:bold; }
+    label { display:block; margin-top:12px; font-weight:bold; }
+    input, select {
+      padding:6px; margin-top:4px; width:100%;
+      border:1px solid #ccc; border-radius:4px; font-size:14px;
+    }
+    button {
+      margin-top:20px; padding:10px; font-size:15px; cursor:pointer;
+      width:100%; border:none; border-radius:4px;
+    }
+    #updateBtn { background-color:#1565c0; color:white; }
+    #cancelBtn { background-color:#9e9e9e; color:white; }
+    button:disabled { background-color:#9e9e9e !important; cursor:not-allowed; }
+    #statusDialog {
+      display:none; margin-top:20px; padding:15px;
+      text-align:center; border:1px solid #1565c0;
+      border-radius:6px; background:#f5f5f5;
+    }
+    #closeDialogBtn {
+      margin-top:12px; background-color:#1565c0; color:white;
+      border:none; padding:8px 20px; border-radius:4px; font-size:14px;
+      cursor:pointer;
+    }
+    #closeDialogBtn:disabled {
+      background-color:#9e9e9e !important; cursor:not-allowed;
+    }
+  </style>
+</head>
+<body>
+  <h3>עדכון סטטוס גורף</h3>
+
+  <label for="monthYearInput">בחר חודש‑שנה:</label>
+  <input type="month" id="monthYearInput">
+
+  <label for="newStatus">בחר סטטוס חדש:</label>
+  <select id="newStatus">
+    <option value="">-- בחר סטטוס --</option>
+    <option value="דווח-טרם שולם">דווח‑טרם שולם</option>
+    <option value="שולם - אסור לערוך שינויים">שולם ‑ אסור לערוך שינויים</option>
+    <option value="הועבר לתשלום - אסור לערוך שינויים">הועבר‑לתשלום ‑ אסור לערוך שינויים</option>
+  </select>
+
+  <button id="updateBtn">עדכן ✅</button>
+  <button id="cancelBtn">סגור ❌</button>
+
+  <div id="statusDialog">
+    <h4>סטטוס ריצה</h4>
+    <p id="statusMsg">המערכת בריצה, נא להמתין...</p>
+    <button id="closeDialogBtn" disabled>סיום</button>
+  </div>
+
+  <script>
+    const LOG_TAG = '[BulkStatusSidebar]';
+
+    window.onload = () => {
+      console.log(LOG_TAG, 'Loaded');
+      initializeForm();
+      bindEvents();
+    };
+
+    function initializeForm() {
+      const now = new Date();
+      const y = now.getFullYear();
+      const m = ('0' + (now.getMonth() + 1)).slice(-2);
+      document.getElementById('monthYearInput').value = `${y}-${m}`;
+      console.log(LOG_TAG, 'Form initialized to current month/year:', `${y}-${m}`);
+    }
+
+    function bindEvents() {
+      document.getElementById('updateBtn').addEventListener('click', applyStatus);
+      document.getElementById('cancelBtn').addEventListener('click', () => google.script.host.close());
+      document.getElementById('closeDialogBtn').addEventListener('click', () => google.script.host.close());
+      console.log(LOG_TAG, 'Event handlers bound');
+    }
+
+    function applyStatus() {
+      const monthInput = document.getElementById('monthYearInput').value;
+      const status     = document.getElementById('newStatus').value;
+
+      if (!monthInput || !status) {
+        alert('⚠️ יש לבחור גם חודש‑שנה וגם סטטוס יעד.');
+        console.warn(LOG_TAG, 'Validation failed: monthInput or status missing', { monthInput, status });
+        return;
+      }
+
+      const [year, month] = monthInput.split('-');
+      const monthYear = `${month}-${year}`; // MM‑yyyy
+      const runId = 'RUN-QUICK-' + Date.now();
+
+      console.log(LOG_TAG, 'Applying status update:', { monthYear, status, runId });
+
+      setUIBusy(true);
+      document.getElementById('statusDialog').style.display = 'block';
+      document.getElementById('statusMsg').innerText = '⏳ המערכת בריצה, נא להמתין...';
+
+      google.script.run
+        .withSuccessHandler((count) => {
+          const msg = `✅ בוצעו ${count} עדכונים.`;
+          console.log(LOG_TAG, 'Success:', count, 'rows updated');
+          document.getElementById('statusMsg').innerText = msg;
+          document.getElementById('closeDialogBtn').disabled = false;
+          setUIBusy(false);
+        })
+        .withFailureHandler((err) => {
+          const errMsg = err?.message || 'שגיאה לא צפויה. בדוק הלוג.';
+          console.error(LOG_TAG, 'Error updating bulk status:', err);
+          document.getElementById('statusMsg').innerText = `❌ שגיאה: ${errMsg}`;
+          document.getElementById('closeDialogBtn').disabled = false;
+          setUIBusy(false);
+        })
+        .applyStatusForMonthQuick(monthYear, status, [], runId);
+    }
+
+    function setUIBusy(disabled) {
+      document.getElementById('updateBtn').disabled = disabled;
+      document.getElementById('cancelBtn').disabled = disabled;
+      document.getElementById('closeDialogBtn').disabled = disabled;
+      document.body.style.cursor = disabled ? 'wait' : 'default';
+      console.log(LOG_TAG, 'UI busy state:', disabled);
+    }
+  </script>
+</body>
+</html>
