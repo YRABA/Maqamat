@@ -48,8 +48,14 @@ function applyStatusForMonthQuick(monthYear, newStatus) {
     const row = values[r];
     const currMonth = formatMonthYear(row[monthCol]);
     const currStatus = String(row[statusCol] || '').trim();
-    if (currMonth === monthYear && currStatus !== newStatus) {
-      updates.push(r + 1);
+
+    if (currMonth === monthYear) {
+      const isDifferent = currStatus !== newStatus;
+      const isUnlocking = newStatus === 'דווח-טרם שולם';
+
+      if (isDifferent || isUnlocking) {
+        updates.push(r + 1); // add actual row number
+      }
     }
   }
 
@@ -69,21 +75,23 @@ function applyStatusForMonthQuick(monthYear, newStatus) {
 
   // 5. עדכון בפועל
   updates.forEach(rowNum => {
-    const i = rowNum - 2;
+    const i = rowNum - 2; // zero-based index
     statusVals[i][0] = newStatus;
 
     if (['שולם - אסור לערוך שינויים', 'הועבר לתשלום - אסור לערוך שינויים'].includes(newStatus)) {
-     // msgVals[i][0] = '🔒 נעול לעריכה';
-      bgColors[i] = bgColors[i].map(() => '#e0e0e0');
-    } else {
-      msgVals[i][0] = '';
-      bgColors[i] = bgColors[i].map(() => '#ffffff');
+      // Locking — apply grey only where it's currently white
+      bgColors[i] = bgColors[i].map(color =>
+        color === '#ffffff' ? '#e0e0e0' : color
+      );
+    } else if (newStatus === 'דווח-טרם שולם') {
+      // Unlocking — always reset to white
+      bgColors[i] = Array(bgColors[i].length).fill('#ffffff');
     }
   });
 
   // 6. כתיבה
   statusRange.setValues(statusVals);
-  msgRange.setValues(msgVals);
+  msgRange.setValues(msgVals); // no changes to message logic
   bgRange.setBackgrounds(bgColors);
 
   // 7. לוג לסטטוס
