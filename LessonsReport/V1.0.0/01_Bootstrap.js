@@ -14,64 +14,121 @@ function onOpen() {
 function onEdit(e) {
   try {
     if (!e || !e.range) return;
+
     const sheet = e.range.getSheet();
     if (sheet.getName() !== 'דיווח שיעורים') return;
 
-    const headers = sheet.getRange(1,1,1,sheet.getLastColumn()).getValues()[0];
-    const idx     = Utils.indexMap(headers);
-    const row     = e.range.getRow(), col = e.range.getColumn();
-    if (row < 2) return;
+    const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+    const idx = Utils.indexMap(headers);
 
-    const statusVal = String(sheet.getRange(row, idx['סטטוס'] + 1).getValue() || '').trim();
-    const isStatusCol = (col === idx['סטטוס'] + 1);
-    const isLocked = ProtectSvc.isLockedStatus(statusVal);
+    const startRow = e.range.getRow();
+    const startCol = e.range.getColumn();
+    const numRows = e.range.getNumRows();
+    const numCols = e.range.getNumColumns();
 
-    if (!isStatusCol && isLocked) {
-      const isSingleCell = (e.range.getNumRows() === 1 && e.range.getNumColumns() === 1);
+    if (startRow < 2) return; // skip header
 
-      if (isSingleCell) {
-        if (typeof e.oldValue !== 'undefined') {
-          if (col === idx['תאריך השיעור'] + 1) {
-            e.range.setValue(_restoreOldDateValue(e.oldValue));
-            sheet.getRange(row, idx['תאריך השיעור'] + 1).setNumberFormat('dd/MM/yyyy');
-          } else if (col === idx['חודש תשלום'] + 1) {
-            e.range.setValue(_restoreOldMonthYearValue(e.oldValue));
-            sheet.getRange(row, idx['חודש תשלום'] + 1).setNumberFormat('MM-yyyy');
-          } else {
-            e.range.setValue(e.oldValue);
+    const statusCol = idx['סטטוס'] + 1;
+    const dateCol = idx['תאריך השיעור'] + 1;
+    const msgCol = idx['הודעת מערכת'] + 1;
+
+    const isStatusCol = (startCol === statusCol && numCols === 1);
+    const isDateCol = (startCol === dateCol && numCols === 1);
+    const logSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('לוג ריצות');
+    const timestamp = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm:ss');
+
+    // ✅ Status column logic (supports multi-row edits)
+    if (isStatusCol) {
+      const values = e.range.getValues();
+
+      for (let i = 0; i < numRows; i++) {
+        const row = startRow + i;
+        const newVal = String(values[i][0] || '').trim();
+
+        // Toggle locking
+        ProtectSvc.toggleRowLockForRow(sheet, headers, row);
+
+        if (newVal === 'דווח-טרם שולם') {
+          // Set white background
+          const bgRange = sheet.getRange(row, 1, 1, sheet.getLastColumn());
+          bgRange.setBackgrounds([Array(sheet.getLastColumn()).fill('#ffffff')]);
+
+          // ✅ Log unlocked row
+          if (logSheet) {
+            SheetsSvc.ensureHeader(logSheet, ['Timestamp', 'Row', 'Action', 'Status']);
+            logSheet.appendRow([timestamp, row, 'Unlocked manually', newVal]);
           }
-        } else {
-          e.range.clearContent();
-          if (col === idx['תאריך השיעור'] + 1)
-            sheet.getRange(row, idx['תאריך השיעור'] + 1).setNumberFormat('dd/MM/yyyy');
-          if (col === idx['חודש תשלום'] + 1)
-            sheet.getRange(row, idx['חודש תשלום'] + 1).setNumberFormat('MM-yyyy');
+        } else if (ProtectSvc.isLockedStatus(newVal)) {
+          // ✅ Log locked row
+          if (logSheet) {
+            SheetsSvc.ensureHeader(logSheet, ['Timestamp', 'Row', 'Action', 'Status']);
+            logSheet.appendRow([timestamp, row, 'Locked manually', newVal]);
+          }
         }
-
-      } else {
-        e.range.clearContent();
-        const r1 = e.range.getRow(), c1 = e.range.getColumn();
-        const rN = e.range.getNumRows(), cN = e.range.getNumColumns();
-        const relDate  = (idx['תאריך השיעור'] + 1) - c1;
-        const relMonth = (idx['חודש תשלום'] + 1) - c1;
-        if (relDate >= 0 && relDate < cN)
-          sheet.getRange(r1, c1 + relDate, rN, 1).setNumberFormat('dd/MM/yyyy');
-        if (relMonth >= 0 && relMonth < cN)
-          sheet.getRange(r1, c1 + relMonth, rN, 1).setNumberFormat('MM-yyyy');
       }
-      return;
+
+      // Show one toast
+      sheet.toast('סטטוס עודכן. שורות טופלו בהתאם.', 'הודעת מערכת', 3);
     }
 
-    if (isStatusCol) {
-      ProtectSvc.toggleRowLockForRow(sheet, headers, row);
-      const newVal = String(e.range.getValue() || '').trim();
-      sheet.toast(
-        newVal === 'דווח-טרם שולם'
-          ? '✅ השורה פתוחה לעריכה.'
-          : '🔒 השורה ננעלה לעריכה (ניתן לשנות רק את הסטטוס).',
-        'הודעת מערכת',
-        newVal === 'דווח-טרם שולם' ? 3 : 4
-      );
+    // ✅ תאריך השיעור logic: insert/remove warning
+    if (isDateCol) {
+      const dateValues = e.range.getValues();
+
+      for (let i = 0; i < numRows; i++) {
+        const row = startRow + i;
+        const val = dateValues[i][0];
+        const msgCell = sheet.getRange(row, msgCol);
+        const currentMsg = String(msgCell.getValue() || '').trim();
+
+        if (val instanceof Date) {
+          // Remove warning if present
+          if (currentMsg === 'יש לעדכן תאריך שיעור') {
+            msgCell.setValue('');
+          }
+        } else {
+          // Add warning if not already present
+          if (currentMsg !== 'יש לעדכן תאריך שיעור') {
+            msgCell.setValue('יש לעדכן תאריך שיעור');
+          }
+        }
+      }
+    }
+
+    // ✅ Block changes in locked rows for non-status fields
+    for (let r = 0; r < numRows; r++) {
+      const row = startRow + r;
+      for (let c = 0; c < numCols; c++) {
+        const col = startCol + c;
+
+        if (col !== statusCol) {
+          const statusVal = String(sheet.getRange(row, statusCol).getValue() || '').trim();
+          const isLocked = ProtectSvc.isLockedStatus(statusVal);
+          if (isLocked) {
+            const targetCell = e.range.getCell(r + 1, c + 1);
+
+            // Try to restore the original value
+            let originalValue;
+            if (e.oldValues && Array.isArray(e.oldValues)) {
+              originalValue = e.oldValues[r]?.[c];
+            } else if (e.oldValue !== undefined) {
+              originalValue = e.oldValue;
+            }
+
+            if (typeof originalValue !== 'undefined') {
+              targetCell.setValue(originalValue);
+            } else {
+              targetCell.clearContent();
+            }
+
+            // Restore formatting
+            if (col === dateCol)
+              sheet.getRange(row, col).setNumberFormat('dd/MM/yyyy');
+            if (col === idx['חודש תשלום'] + 1)
+              sheet.getRange(row, col).setNumberFormat('MM-yyyy');
+          }
+        }
+      }
     }
 
   } catch (err) {

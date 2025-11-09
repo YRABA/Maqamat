@@ -73,7 +73,7 @@ function applyStatusForMonthQuick(monthYear, newStatus) {
     statusVals[i][0] = newStatus;
 
     if (['שולם - אסור לערוך שינויים', 'הועבר לתשלום - אסור לערוך שינויים'].includes(newStatus)) {
-      msgVals[i][0] = '🔒 נעול לעריכה';
+     // msgVals[i][0] = '🔒 נעול לעריכה';
       bgColors[i] = bgColors[i].map(() => '#e0e0e0');
     } else {
       msgVals[i][0] = '';
