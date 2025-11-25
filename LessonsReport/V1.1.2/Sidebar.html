@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <base target="_top">
+    <meta charset="utf-8">
+    <style>
+      body { direction: rtl; font-family: Arial, sans-serif; padding:15px; }
+      h3 { margin-top:10px; color:#444; text-align:center; font-size:18px; font-weight:bold; }
+      label { display:block; margin-top:12px; font-weight:bold; }
+      .inline-label { display:flex; align-items:center; gap:8px; margin-top:12px; font-weight:bold; }
+      .help-icon { position:relative; display:inline-flex; align-items:center; justify-content:center;
+                   width:20px; height:20px; border-radius:50%; border:1px solid #1565c0; color:#1565c0;
+                   font-size:13px; cursor:help; user-select:none; }
+      .help-icon:hover::after {
+        content: attr(data-tooltip);
+        position:absolute; bottom:125%; right:50%; transform:translateX(50%);
+        width:240px; background:#1565c0; color:#fff; padding:8px 10px; border-radius:6px;
+        font-size:12px; line-height:1.4; text-align:center; box-shadow:0 2px 6px rgba(0,0,0,0.2);
+        opacity:0.95; z-index:1000;
+      }
+      .help-icon:hover::before {
+        content:""; position:absolute; bottom:110%; right:50%; transform:translateX(50%);
+        border-width:6px; border-style:solid; border-color:#1565c0 transparent transparent transparent;
+      }
+      input, select { padding:6px; margin-top:4px; width:100%; border:1px solid #ccc; border-radius:4px; font-size:14px; }
+      button { margin-top:20px; padding:10px; font-size:15px; cursor:pointer; width:100%; border:none; border-radius:4px; }
+      #updateBtn { background-color:#1565c0; color:white; }
+      #cancelBtn { background-color:#9e9e9e; color:white; }
+      #settingsToggle { margin-top:20px; cursor:pointer; text-align:center; font-size:18px; }
+      .settings { display:none; margin-top:20px; border-top:1px solid #ddd; padding-top:10px; }
+      #resultDialog { display:none; margin-top:20px; padding:15px; text-align:center;
+                      border:1px solid #1565c0; border-radius:6px; }
+      #resultMsg { margin-bottom:10px; }
+      #closeDialogBtn { background-color:#1565c0; color:white; padding:8px 20px; border:none; border-radius:4px; }
+      button:disabled { background-color:#9e9e9e !important; cursor:not-allowed; }
+    </style>
+  </head>
+  <body>
+    <h3>עדכון שיעורים בתאריכים לפי ימי לימוד בחודש/שנה</h3>
+
+    <label for="monthYearInput">בחר חודש-שנה:</label>
+    <input type="month" id="monthYearInput">
+
+    <div class="inline-label">
+      <span>בחר סוג דיווח:</span>
+      <span class="help-icon" data-tooltip="בחר אילו סוגי שיעורים יעובדו בהרצה זו. ניתן להריץ שוב עם בחירה אחרת לפי צורך.">?</span>
+    </div>
+
+    <select id="runScope" aria-label="בחירת סוג דיווח">
+      <option value="both">גם פרטיים וגם קבוצתיים (מומלץ)</option>
+      <option value="private">שיעורים פרטיים בלבד</option>
+      <option value="group">שיעורים קבוצתיים בלבד</option>
+    </select>
+
+    <button id="updateBtn" onclick="runUpdate()">✅ עדכן</button>
+    <button id="cancelBtn" onclick="google.script.host.close()">❌ סגור</button>
+
+    <div id="settingsToggle" onclick="toggleSettings()">⚙️ הגדרות מתקדמות</div>
+
+    <div class="settings" id="settingsSection">
+      <h4>התנהגות בעת מציאת רשומה קיימת:</h4>
+      <select id="mode">
+        <option value="skip">דלג (Skip)</option>
+        <option value="overwrite">דרוס (Overwrite)</option>
+        <option value="reset">מחק (Reset)</option>
+      </select>
+    </div>
+
+    <div id="resultDialog">
+      <h4>סטטוס ריצה</h4>
+      <p id="resultMsg" aria-live="polite"></p>
+      <button id="closeDialogBtn" onclick="closeDialog()" disabled>סיום</button>
+    </div>
+
+    <script>
+      const LOG_TAG = '[Sidebar]';
+
+      window.onload = () => {
+        console.log(LOG_TAG, 'Sidebar loaded');
+        initForm();
+        restoreRunScope();
+      };
+
+      function initForm() {
+        const now = new Date();
+        const y = now.getFullYear();
+        const m = ('0' + (now.getMonth() + 1)).slice(-2);
+        document.getElementById('monthYearInput').value = `${y}-${m}`;
+        document.getElementById('mode').value = 'skip';
+        document.getElementById('runScope').value = 'both';
+        console.log(LOG_TAG, 'Initialized form defaults');
+      }
+
+      function restoreRunScope() {
+        if (google?.script?.run?.withSuccessHandler) {
+          google.script.run
+            .withSuccessHandler((v) => {
+              if (v) {
+                document.getElementById('runScope').value = v;
+                console.log(LOG_TAG, 'Restored last runScope:', v);
+              }
+            })
+            .getLastRunScope();
+        }
+      }
+
+      function runUpdate() {
+        const monthYear = document.getElementById('monthYearInput').value;
+        const mode = document.getElementById('mode').value;
+        const runScope = document.getElementById('runScope').value;
+
+        if (!monthYear) {
+          alert('⚠️ יש לבחור חודש ושנה לפני ההרצה.');
+          return;
+        }
+
+        console.log(LOG_TAG, 'Running update with', { monthYear, mode, runScope });
+
+        setUIBusy(true);
+        document.getElementById('resultMsg').innerText = '⏳ המערכת בריצה, נא להמתין...';
+        document.getElementById('resultDialog').style.display = 'block';
+
+        google.script.run
+          .withSuccessHandler((msg) => {
+            console.log(LOG_TAG, 'Run success:', msg);
+            document.getElementById('resultMsg').innerText = msg || '✅ הפעולה הושלמה.';
+            setUIBusy(false);
+          })
+          .withFailureHandler((err) => {
+            const errMsg = err?.message || 'שגיאה לא צפויה. בדוק את הלוג או נסה שוב.';
+            console.error(LOG_TAG, 'Run error:', err);
+            document.getElementById('resultMsg').innerText = '❌ שגיאה: ' + errMsg;
+            setUIBusy(false);
+          })
+          .processReport(monthYear, mode, runScope);
+      }
+
+      function toggleSettings() {
+        const sec = document.getElementById('settingsSection');
+        const visible = sec.style.display === 'block';
+        sec.style.display = visible ? 'none' : 'block';
+        console.log(LOG_TAG, 'Advanced settings toggled:', !visible);
+      }
+
+      function closeDialog() {
+        console.log(LOG_TAG, 'Closing sidebar');
+        google.script.host.close();
+      }
+
+      function setUIBusy(isBusy) {
+        document.getElementById('updateBtn').disabled = isBusy;
+        document.getElementById('cancelBtn').disabled = isBusy;
+        document.getElementById('closeDialogBtn').disabled = !isBusy ? false : true;
+      }
+    </script>
+  </body>
+</html>
